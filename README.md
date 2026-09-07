@@ -59,6 +59,20 @@ APTOS 2019 ships **one image per patient** with no `patient_id` column, so the
 split keys on `id_code`; if a future data drop adds `patient_id`, the script
 groups by it automatically.
 
+**If the competition download 401s** (Kaggle gates the *entire* Competitions
+API — even after phone verification, a new account often still needs to
+re-accept site Terms in a browser and click *Join Competition*): use a mirror
+served through the non-gated **Datasets API** instead —
+
+```bash
+python -m src.data.prepare_aptos --out data/aptos --kaggle-dataset mariaherrerot/aptos2019
+```
+
+`prepare_aptos.py` locates the label CSV and images regardless of the mirror's
+folder layout / column names (`id_code`/`image`, `diagnosis`/`level`). A mirror
+is a community re-upload, not the official source — say so in the write-up. Or
+download any copy by hand and pass `--raw /path/to/unzipped`.
+
 **Synthetic fallback** (no Kaggle needed — lets you build/test the whole
 pipeline; **metrics from it are meaningless** and every artifact says so):
 
@@ -218,9 +232,15 @@ then `evaluate.py`. Paste the headline numbers here:
 
 ## Needs my input
 
-1. **Real dataset access** — Kaggle `KAGGLE_USERNAME` / `KAGGLE_KEY` and accepted
-   APTOS 2019 competition rules. Until then everything runs on synthetic data
-   and **no accuracy number is real**.
+1. **Real dataset access** — Kaggle token is set and valid, but this account's
+   **Competitions API returns 401** for everything (list + download), while the
+   Datasets API works. Fix: in a browser, log in at kaggle.com, clear any
+   "accept updated Terms" banner, open the APTOS 2019 competition and click
+   *Join Competition* / *I Understand and Accept*; if it still 401s, regenerate
+   the API token (Settings → API → Create New Token). Meanwhile, unblock with
+   `--kaggle-dataset mariaherrerot/aptos2019` (Datasets API mirror). Until real
+   data is in, everything runs on synthetic data and **no accuracy number is
+   real**.
 2. **Actual training run** — needs a GPU box / Colab. Nothing here has been
    trained on real fundus images yet.
 3. **Base44 app domain for CORS** — I put `ALLOWED_ORIGIN` as an env var with a
