@@ -212,37 +212,48 @@ Base44 wiring.
 
 ## Current model performance
 
-**Not yet trained on real data in this environment.** The pipeline has only
-been exercised end-to-end on the **synthetic placeholder** dataset, whose
-numbers are meaningless by construction (random labels). `models/best.pt`
-currently holds a synthetic-trained `edge` checkpoint purely so the API and
-Grad-CAM run; `GET /health` reports `"synthetic_weights": true` for it, and
-`evaluate.py` prints a warning when the data manifest is synthetic.
+Trained on **real APTOS 2019** — 3 662 fundus images (one per patient),
+patient-level stratified split 2 563 / 550 / 549 (train / val / test). The
+checkpoint in `models/best.pt` is the **`edge` backbone (MobileNetV3-Small,
+~2.5 M params)**, picked here for fast CPU inference; the larger `b3` backbone
+should match or beat these numbers but has not been trained in this
+environment. `GET /health` reports `"synthetic_weights": false` for this
+checkpoint.
 
-**To fill this in:** run `prepare_aptos.py` with Kaggle credentials, then
-`train.py --backbone b3` (≈30–60 min on a single modern GPU; longer on CPU),
-then `evaluate.py`. Paste the headline numbers here:
+Held-out **test** split (n = 549), from `models/test_metrics.json`:
 
-> _EfficientNet-B3, APTOS 2019 held-out test split (n = …):_
-> **Referable-DR (grade ≥ 2) sensitivity: …% / specificity: …%**,
-> quadratic weighted kappa **…**, per-grade AUROC …. Confusion matrix in
-> `models/confusion_matrix.png`.
+| Metric | Value |
+|---|---|
+| **Referable-DR (grade ≥ 2) sensitivity** | **89.7%** |
+| Referable-DR specificity | 93.8% |
+| Referable-DR precision / F1 | 91.0% / 0.90 |
+| Quadratic weighted kappa | **0.871** |
+| Overall accuracy | 78.1% |
+| Per-grade AUROC (grades 0–4) | 0.99 / 0.94 / 0.92 / 0.91 / 0.91 |
+
+Per-grade sensitivity drops on the rare high grades (grade 0 97%, 1 64%,
+2 65%, 3 41%, 4 49%) — expected on APTOS's heavy imbalance (grade 0 is ~half
+the data), and the reason the headline metric is *referable-DR sensitivity*
+rather than accuracy: nearly all grade-3/4 errors fall into grade 2, which is
+still a referral (only 3 of 224 referable cases are missed as
+non-referable). Full confusion matrix in `models/confusion_matrix.png`.
+
+> _Reproduce:_ `prepare_aptos.py --kaggle-dataset mariaherrerot/aptos2019`
+> → `train.py --backbone edge` → `evaluate.py --weights models/best.pt`.
 
 ---
 
 ## Needs my input
 
-1. **Real dataset access** — Kaggle token is set and valid, but this account's
-   **Competitions API returns 401** for everything (list + download), while the
-   Datasets API works. Fix: in a browser, log in at kaggle.com, clear any
-   "accept updated Terms" banner, open the APTOS 2019 competition and click
-   *Join Competition* / *I Understand and Accept*; if it still 401s, regenerate
-   the API token (Settings → API → Create New Token). Meanwhile, unblock with
-   `--kaggle-dataset mariaherrerot/aptos2019` (Datasets API mirror). Until real
-   data is in, everything runs on synthetic data and **no accuracy number is
-   real**.
-2. **Actual training run** — needs a GPU box / Colab. Nothing here has been
-   trained on real fundus images yet.
+1. **Real dataset access** — *resolved.* The official Competitions API still
+   401s on this account, so data was pulled from the non-gated Datasets mirror
+   `--kaggle-dataset mariaherrerot/aptos2019` (a community re-upload — flag it
+   as such in the write-up). To use the official source, in a browser log in at
+   kaggle.com, clear any "accept updated Terms" banner, open the APTOS 2019
+   competition and click *Join Competition*; if it still 401s, regenerate the
+   API token (Settings → API → Create New Token).
+2. **Actual training run** — *done* for the `edge` backbone (see *Current model
+   performance*). The `b3` backbone still needs a GPU run for its own numbers.
 3. **Base44 app domain for CORS** — I put `ALLOWED_ORIGIN` as an env var with a
    placeholder. Get the real `https://<something>.base44.app` domain from the
    teammate who owns the app and set it on the deploy host (see `DEPLOY.md` §3).
