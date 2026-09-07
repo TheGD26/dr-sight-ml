@@ -1,0 +1,29 @@
+# Datasets and weights are large / license-restricted — never commit them.
+# Anchored to repo root so src/data/ is NOT ignored.
+/data/
+/models/
+!/models/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Local env / secrets
+.env
+kaggle.json
+.kaggle/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Generated artifacts
+tests/gradcam_samples/*.png
+runs/
+*.log

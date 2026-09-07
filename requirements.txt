@@ -1,0 +1,36 @@
+# DR-Sight ML backend — pinned to versions verified working on macOS/arm64
+# (Python 3.13 locally) and python:3.11-slim in the Docker image.
+#
+# Torch is the CPU/MPS wheel from PyPI. For a CUDA host, install torch/torchvision
+# from the appropriate --index-url (see https://pytorch.org) instead of these lines.
+
+# --- deep learning ---
+torch==2.14.0
+torchvision==0.29.0
+timm==1.0.29
+
+# --- explainability ---
+grad-cam==1.5.7
+
+# --- image / data ---
+opencv-python-headless==5.0.0.93
+albumentations==2.0.8
+pillow==11.3.0
+numpy==2.3.2
+pandas==3.0.5
+
+# --- metrics / plotting ---
+scikit-learn==1.8.0
+matplotlib==3.10.5
+
+# --- dataset download ---
+kaggle==2.2.4
+
+# --- API ---
+fastapi==0.129.0
+uvicorn==0.40.0
+python-multipart==0.0.22
+
+# --- tests ---
+pytest==9.1.1
+httpx==0.28.1
