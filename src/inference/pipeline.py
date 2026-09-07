@@ -65,6 +65,7 @@ class PredictionResult:
     referral_escalated: bool = False
     referral_action: str | None = None
     heatmap_base64: str | None = None
+    affected_regions: list[dict] | None = None
     probabilities: list[float] | None = None
     quality_scores: dict | None = None
     disclaimer: str = DISCLAIMER
@@ -90,6 +91,63 @@ def referable_decision(
     referable = p_ref >= threshold
     escalated = referable and grade < min_grade
     return referable, p_ref, escalated
+
+
+def cam_regions(
+    cam: np.ndarray, max_regions: int = 4, rel_threshold: float = 0.55
+) -> list[dict]:
+    """Turn a Grad-CAM heatmap into up to `max_regions` circular regions of
+    interest, in the percentage-coordinate shape the Base44 UI expects:
+
+        {"label", "x", "y", "radius", "intensity"}
+
+    x / y are the blob centroid as 0-100 percent of width / height (top-left
+    origin); radius is the area-equivalent radius as 0-100 percent of width
+    (clamped 2-25); intensity is the mean CAM activation inside the blob (0-1).
+
+    Blobs are the connected components of `cam >= rel_threshold * cam.max()`,
+    ranked by (area * mean activation). Grounded entirely in the model's own
+    Grad-CAM - no lesion detection is claimed.
+    """
+    import cv2
+
+    if cam is None or cam.size == 0:
+        return []
+    cam = np.nan_to_num(cam.astype(np.float32))
+    peak = float(cam.max())
+    if peak <= 1e-6:
+        return []
+    h, w = cam.shape
+    mask = (cam >= rel_threshold * peak).astype(np.uint8)
+    if mask.sum() == 0:
+        return []
+
+    n, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    min_area = max(9.0, 0.002 * h * w)  # ignore specks
+    cand: list[tuple[float, dict]] = []
+    for i in range(1, n):  # 0 is background
+        area = float(stats[i, cv2.CC_STAT_AREA])
+        if area < min_area:
+            continue
+        cx, cy = centroids[i]
+        blob = labels == i
+        intensity = float(cam[blob].mean())
+        radius_px = float(np.sqrt(area / np.pi))
+        region = {
+            "label": "",  # filled after ranking
+            "x": round(cx / w * 100.0, 1),
+            "y": round(cy / h * 100.0, 1),
+            "radius": round(min(25.0, max(2.0, radius_px / w * 100.0)), 1),
+            "intensity": round(min(1.0, max(0.0, intensity)), 3),
+        }
+        cand.append((area * intensity, region))
+
+    cand.sort(key=lambda t: t[0], reverse=True)
+    out = []
+    for rank, (_, region) in enumerate(cand[:max_regions], start=1):
+        region["label"] = f"Model focus region {rank}"
+        out.append(region)
+    return out
 
 
 def _load_image(src: "bytes | str | Path | Image.Image") -> Image.Image:
@@ -164,11 +222,13 @@ class DRPipeline:
 
         # [4] Grad-CAM on the predicted grade
         heatmap_b64 = None
+        regions: list[dict] | None = None
         if with_heatmap:
             cam_res = self.gradcam.explain(
                 x[0], target_class=grade, alpha=self.cfg.gradcam_alpha
             )
             heatmap_b64 = cam_res["overlay_b64"]
+            regions = cam_regions(cam_res["cam"])
 
         # [5] referral + uncertainty
         uncertain = confidence < self.cfg.uncertainty_threshold
@@ -191,6 +251,7 @@ class DRPipeline:
             referral_escalated=bool(escalated),
             referral_action=referral_action(action_grade),
             heatmap_base64=heatmap_b64,
+            affected_regions=regions,
             probabilities=[round(float(p), 4) for p in probs],
             quality_scores=q["scores"],
         )
