@@ -92,6 +92,13 @@ class PipelineConfig:
     weights_path: str = os.getenv("DR_WEIGHTS", "models/best.pt")
     # Top-1 softmax below this -> flag "uncertain": true for mandatory human review.
     uncertainty_threshold: float = float(os.getenv("DR_UNCERTAINTY_THRESHOLD", "0.6"))
+    # Flag "referable": true when P(grade >= 2) >= this, even if the argmax grade
+    # is 0/1. 0.5 ~ argmax behaviour; lower it (e.g. 0.35) to bias toward
+    # catching referable DR at the cost of specificity - the right trade for a
+    # screening tool. Does NOT change the reported `grade`, only `referable` /
+    # `referral_action`. See src/model/evaluate.py for a sensitivity-vs-threshold
+    # sweep to pick the value.
+    referable_threshold: float = float(os.getenv("DR_REFERABLE_THRESHOLD", "0.5"))
     device: str = os.getenv("DR_DEVICE", "auto")  # auto | cpu | cuda | mps
     gradcam_alpha: float = 0.5  # heatmap blend weight
 

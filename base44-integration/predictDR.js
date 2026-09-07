@@ -13,7 +13,11 @@
 // The DR model /predict endpoint accepts JSON: { image: "<base64>", with_heatmap: bool }
 // `image` may be a bare base64 string or a full data URI ("data:image/png;base64,...").
 
-const MODEL_API_URL = "https://<your-deployed-model-url>"; // <-- CHANGE ME
+// TEMPORARY dev tunnel to Giridharan's laptop (cloudflared quick tunnel).
+// It only works while that machine runs `./scripts/serve-local.sh` + the tunnel,
+// and the hostname changes every restart. Swap in the permanent Render/Railway
+// URL once the API is deployed (see ../DEPLOY.md).
+const MODEL_API_URL = "https://cabinet-born-newcastle-tribes.trycloudflare.com";
 
 export default async function predictDR({ imageBase64, withHeatmap = true }) {
   if (!imageBase64 || typeof imageBase64 !== "string") {
@@ -61,7 +65,9 @@ export default async function predictDR({ imageBase64, withHeatmap = true }) {
   //   label: "No DR" | "Mild NPDR" | "Moderate NPDR" | "Severe NPDR" | "Proliferative DR" | null,
   //   confidence: number | null,          // top-1 softmax, 0..1
   //   uncertain: boolean,                 // true => flag for mandatory human review
-  //   referable: boolean | null,          // grade >= 2
+  //   referable: boolean | null,          // P(grade>=2) >= server threshold
+  //   p_referable: number | null,         // softmax mass on grades >= 2
+  //   referral_escalated: boolean,        // true => referral driven by threshold, not argmax grade
   //   referral_action: string | null,
   //   heatmap_base64: string | null,      // PNG, render as data:image/png;base64,...
   //   probabilities: number[] | null,

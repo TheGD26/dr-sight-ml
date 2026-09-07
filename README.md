@@ -168,6 +168,8 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST $BASE/predict -F "file=@sample_
   "confidence": 0.74,
   "uncertain": false,
   "referable": true,
+  "p_referable": 0.89,
+  "referral_escalated": false,
   "referral_action": "Refer to ophthalmologist within ~6 months.",
   "heatmap_base64": "iVBORw0KG...",
   "probabilities": [0.03, 0.08, 0.74, 0.10, 0.05],
@@ -179,6 +181,15 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST $BASE/predict -F "file=@sample_
 If `usable_image` is `false`, `rejection_reason` is set and all grading fields
 are `null`. If `confidence < DR_UNCERTAINTY_THRESHOLD` (default 0.6),
 `"uncertain": true` — the UI must flag it for mandatory human review.
+
+**Referable flag (screening-biased).** `grade` is always the model's argmax
+point estimate. `referable` is decided separately: `p_referable` (the softmax
+mass on grades ≥ 2) ≥ `DR_REFERABLE_THRESHOLD` (default `0.5`). Lower the env
+var (e.g. `0.35`) to catch more referable DR at the cost of specificity — the
+right trade for a screening tool. When a low threshold makes a grade-0/1 image
+referable, `referral_escalated` is `true` and `referral_action` is bumped to
+the "refer within ~6 months" tier. `python -m src.model.evaluate` prints a
+sensitivity/specificity-vs-threshold sweep to help pick the value.
 
 Referral table (from project research, single source of truth in
 [`src/config.py`](src/config.py) `REFERRAL_ACTIONS`):

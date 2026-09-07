@@ -27,7 +27,12 @@ from torch.utils.data import DataLoader
 from src.config import BACKBONES, GRADE_LABELS
 from src.data.dataset import APTOSDataset
 from src.model.architecture import load_checkpoint
-from src.model.metrics import compute_all, format_report
+from src.model.metrics import (
+    compute_all,
+    format_report,
+    format_threshold_sweep,
+    referable_threshold_sweep,
+)
 from src.model.train import pick_device
 
 
@@ -100,6 +105,10 @@ def main() -> None:
     y_true, y_pred, y_prob = infer_split(model, loader, device)
     metrics = compute_all(y_true, y_pred, y_prob)
     print(format_report(metrics))
+
+    sweep = referable_threshold_sweep(y_true, y_prob)
+    metrics["referable_threshold_sweep"] = sweep
+    print("\n" + format_threshold_sweep(sweep))
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)

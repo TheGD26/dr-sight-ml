@@ -61,6 +61,8 @@ class PredictionResult:
     confidence: float | None = None
     uncertain: bool = False
     referable: bool | None = None
+    p_referable: float | None = None
+    referral_escalated: bool = False
     referral_action: str | None = None
     heatmap_base64: str | None = None
     probabilities: list[float] | None = None
@@ -69,6 +71,25 @@ class PredictionResult:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def referable_decision(
+    probs, threshold: float, min_grade: int = REFERABLE_DR_MIN_GRADE
+) -> tuple[bool, float, bool]:
+    """Screening-biased referral decision.
+
+    Returns (referable, p_referable, escalated) where:
+      * p_referable = sum of softmax mass on grades >= min_grade
+      * referable   = p_referable >= threshold
+      * escalated   = referable is driven by the threshold rather than the
+                      argmax grade (i.e. argmax grade < min_grade)
+    """
+    probs = np.asarray(probs, dtype=float)
+    grade = int(probs.argmax())
+    p_ref = float(probs[min_grade:].sum())
+    referable = p_ref >= threshold
+    escalated = referable and grade < min_grade
+    return referable, p_ref, escalated
 
 
 def _load_image(src: "bytes | str | Path | Image.Image") -> Image.Image:
@@ -151,6 +172,12 @@ class DRPipeline:
 
         # [5] referral + uncertainty
         uncertain = confidence < self.cfg.uncertainty_threshold
+        referable, p_referable, escalated = referable_decision(
+            probs, self.cfg.referable_threshold
+        )
+        # `grade` stays the model's argmax point estimate; only the referral
+        # action escalates when the threshold (not argmax) triggers referable.
+        action_grade = REFERABLE_DR_MIN_GRADE if escalated else grade
 
         return PredictionResult(
             usable_image=True,
@@ -159,8 +186,10 @@ class DRPipeline:
             label=grade_label(grade),
             confidence=round(confidence, 4),
             uncertain=bool(uncertain),
-            referable=bool(grade >= REFERABLE_DR_MIN_GRADE),
-            referral_action=referral_action(grade),
+            referable=bool(referable),
+            p_referable=round(p_referable, 4),
+            referral_escalated=bool(escalated),
+            referral_action=referral_action(action_grade),
             heatmap_base64=heatmap_b64,
             probabilities=[round(float(p), 4) for p in probs],
             quality_scores=q["scores"],

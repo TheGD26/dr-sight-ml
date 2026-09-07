@@ -115,7 +115,9 @@ Field reference:
 | `label` | string \| null | "No DR" … "Proliferative DR". |
 | `confidence` | number \| null | Top-1 softmax, 0–1. |
 | `uncertain` | bool | `true` → visually flag for mandatory human review. |
-| `referable` | bool \| null | `grade >= 2`. Handy for a "needs referral" badge. |
+| `referable` | bool \| null | Screening flag: P(grade ≥ 2) ≥ server threshold. Use for a "needs referral" badge. |
+| `p_referable` | number \| null | Softmax mass on grades ≥ 2 (0–1). |
+| `referral_escalated` | bool | `true` → referral triggered by the threshold, not the argmax grade; treat as "borderline, refer to be safe". |
 | `referral_action` | string \| null | The sentence to show the health worker. |
 | `heatmap_base64` | string \| null | PNG; `<img src="data:image/png;base64,…">`. |
 | `probabilities` | number[] \| null | Per-grade softmax, if you want a bar chart. |

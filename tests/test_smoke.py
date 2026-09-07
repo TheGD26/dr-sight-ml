@@ -62,10 +62,29 @@ def test_pipeline_output_contract(pipe):
     assert res["grade"] in range(5)
     assert res["label"]
     assert 0.0 <= res["confidence"] <= 1.0
-    assert res["referral_action"] == REFERRAL_ACTIONS[res["grade"]]
     assert isinstance(res["uncertain"], bool)
+    assert isinstance(res["referable"], bool)
+    assert 0.0 <= res["p_referable"] <= 1.0
+    if res["referral_escalated"]:
+        assert res["referable"] is True and res["grade"] < 2
+        assert res["referral_action"] == REFERRAL_ACTIONS[2]
+    else:
+        assert res["referral_action"] == REFERRAL_ACTIONS[res["grade"]]
     assert res["heatmap_base64"]
     assert "not a diagnosis" in res["disclaimer"]
+
+
+def test_referable_decision_threshold_logic():
+    from src.inference.pipeline import referable_decision
+
+    # argmax grade 1, but 0.45 mass on grades >=2
+    probs = [0.10, 0.45, 0.30, 0.10, 0.05]
+    assert referable_decision(probs, threshold=0.5) == (False, pytest.approx(0.45), False)
+    ref, p, esc = referable_decision(probs, threshold=0.35)
+    assert ref is True and esc is True and p == pytest.approx(0.45)
+    # argmax already referable -> not an escalation
+    ref, p, esc = referable_decision([0.1, 0.1, 0.6, 0.1, 0.1], threshold=0.35)
+    assert ref is True and esc is False
 
 
 def test_pipeline_rejects_before_model(pipe):

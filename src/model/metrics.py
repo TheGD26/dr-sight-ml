@@ -86,6 +86,54 @@ def compute_all(y_true, y_pred, y_prob=None) -> dict:
     return out
 
 
+def referable_threshold_sweep(
+    y_true,
+    y_prob,
+    thresholds=(0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50),
+) -> list[dict]:
+    """Sensitivity / specificity for the binary 'referable DR' decision
+    (P(grade >= REFERABLE_DR_MIN_GRADE) >= threshold) at several thresholds.
+
+    Use this to pick DR_REFERABLE_THRESHOLD: a screening tool wants high
+    sensitivity, accepting lower specificity.
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    y_prob = np.asarray(y_prob)
+    p_ref = y_prob[:, REFERABLE_DR_MIN_GRADE:].sum(axis=1)
+    is_ref = y_true >= REFERABLE_DR_MIN_GRADE
+    rows = []
+    for t in thresholds:
+        pred = p_ref >= t
+        tp = int((pred & is_ref).sum())
+        fn = int((~pred & is_ref).sum())
+        fp = int((pred & ~is_ref).sum())
+        tn = int((~pred & ~is_ref).sum())
+        rows.append(
+            {
+                "threshold": float(t),
+                "sensitivity": tp / (tp + fn) if (tp + fn) else 0.0,
+                "specificity": tn / (tn + fp) if (tn + fp) else 0.0,
+                "tp": tp,
+                "fn": fn,
+                "fp": fp,
+                "tn": tn,
+            }
+        )
+    return rows
+
+
+def format_threshold_sweep(rows: list[dict]) -> str:
+    out = ["Referable-DR decision vs P(grade>=2) threshold:",
+           f"{'thr':>6} {'sens':>8} {'spec':>8} {'missed':>8} {'false_ref':>10}"]
+    for r in rows:
+        out.append(
+            f"{r['threshold']:>6.2f} {r['sensitivity']*100:>7.1f}% "
+            f"{r['specificity']*100:>7.1f}% {r['fn']:>8d} {r['fp']:>10d}"
+        )
+    out.append("(set DR_REFERABLE_THRESHOLD to the lowest thr whose specificity is still acceptable)")
+    return "\n".join(out)
+
+
 def format_report(m: dict) -> str:
     lines = []
     lines.append("=" * 60)

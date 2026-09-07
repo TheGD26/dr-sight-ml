@@ -50,6 +50,7 @@ call. We use **Render** — it builds from your `Dockerfile`, gives you a stable
 | `DR_BACKBONE` | `b3` | `b3` (accuracy) or `edge` (fast). Must match the committed checkpoint. |
 | `DR_DEVICE` | `cpu` | Render free/standard instances are CPU-only. |
 | `DR_UNCERTAINTY_THRESHOLD` | `0.6` | Below this top-1 softmax, results are flagged `"uncertain": true`. |
+| `DR_REFERABLE_THRESHOLD` | `0.5` | Flag `"referable": true` when P(grade ≥ 2) ≥ this. Lower (e.g. `0.35`) to bias toward catching referable DR. Pick it from the sweep `evaluate.py` prints. |
 | `MAX_UPLOAD_BYTES` | `12582912` | 12 MB. Bodies larger than this get `413` before the model runs. |
 
 Redeploy after adding vars (Render does this automatically on save).
