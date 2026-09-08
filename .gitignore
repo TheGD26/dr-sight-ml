@@ -25,5 +25,6 @@ kaggle.json
 
 # Generated artifacts
 tests/gradcam_samples/*.png
+matlab/output/
 runs/
 *.log
