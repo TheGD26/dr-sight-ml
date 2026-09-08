@@ -1,0 +1,13 @@
+# Netlify config for the Retina web front-end.
+# In the Netlify UI set "Base directory" = dr-sight-web (this folder), then
+# these paths resolve correctly. Set VITE_MODEL_API_URL and VITE_MODEL_API_KEY
+# as environment variables in Site settings -> Environment variables.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# React Router is a SPA: every path must serve index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -1,0 +1,27 @@
+# Render Blueprint for the DR-Sight ML API.
+# Deploy: Render dashboard -> New -> Blueprint -> pick TheGD26/dr-sight-ml.
+# Secrets (API_KEY, ALLOWED_ORIGIN) are marked sync:false -> set them in the
+# dashboard after the first deploy. See DEPLOY.md.
+services:
+  - type: web
+    name: dr-sight-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: API_KEY
+        sync: false
+      - key: ALLOWED_ORIGIN
+        sync: false
+      - key: DR_BACKBONE
+        value: edge
+      - key: DR_DEVICE
+        value: cpu
+      - key: DR_UNCERTAINTY_THRESHOLD
+        value: "0.6"
+      - key: DR_REFERABLE_THRESHOLD
+        value: "0.5"
+      - key: MAX_UPLOAD_BYTES
+        value: "12582912"
