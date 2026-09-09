@@ -27,8 +27,11 @@ Base44 front-end calls through a Backend Function.
 | `src/model/train.py` | Two-stage transfer learning, class-weighted loss, checkpoint on best val **quadratic weighted kappa**. |
 | `src/model/evaluate.py` | Sensitivity / specificity / precision / F1 / AUROC / QWK + confusion matrix. Headline = **referable-DR (grade ≥ 2) sensitivity**. |
 | `src/explain/gradcam.py` | `pytorch-grad-cam` on the last conv block → overlay PNG (base64) + raw CAM array. CLI dumps 5 samples. |
-| `src/inference/pipeline.py` | quality gate → preprocess → model → Grad-CAM → referral lookup + uncertainty flag. |
-| `src/api/main.py` | `POST /predict`, `GET /health`, `X-API-Key` auth, CORS allow-list, body-size limit. |
+| `src/inference/pipeline.py` | **Reference PyTorch pipeline.** quality gate → preprocess → model → Grad-CAM → referral lookup + uncertainty flag. Used only when `SCREENING_BACKEND=python` (local debugging), and for training-time validation. |
+| `src/inference/matlab_pipeline.py` | **Default screening backend.** Owns one long-lived MATLAB Engine session, imports `dr_sight.onnx` once, and runs `matlab/screen_image.m` per request. Returns the same dict shape as `PredictionResult.to_dict()`. |
+| `matlab/screen_image.m` | The MATLAB orchestrator: `quality_gate.m` → `grade_dr.m` → `explain_gradcam.m`, mirroring all five stages of `DRPipeline.run()`. |
+| `src/api/main.py` | `POST /predict`, `GET /health`, `X-API-Key` auth, CORS allow-list, body-size limit. Thin transport — dispatches to the backend named by `SCREENING_BACKEND`. |
+| `scripts/compare_backends.py` | Screen sample images through **both** backends and print grade / confidence / P(referable) + max |Δ softmax| — proves the MATLAB path reproduces the validated PyTorch numbers. |
 | `base44-integration/` | Reference Base44 Backend Function + wiring guide. |
 | `Dockerfile`, `DEPLOY.md` | CPU image + step-by-step deploy (Render). |
 
@@ -125,16 +128,61 @@ python -m src.explain.gradcam --data data/aptos/labels.csv --weights models/best
 #    structures, not the black border / lens flare.
 ```
 
+## Screening backend (MATLAB by default)
+
+Under PS **SIH26038** the live service does **all** screening computation —
+image-quality assessment, DR grading, Grad-CAM explainability — **inside
+MATLAB**, via `matlab/screen_image.m` called through the MATLAB Engine API for
+Python (`src/inference/matlab_pipeline.py`). FastAPI is a thin HTTP transport
+only: it handles auth, CORS and the body-size cap, then hands the image bytes to
+one long-lived MATLAB session that has `dr_sight.onnx` imported once. **PyTorch
+does not run in the request path** — it remains only as historical training code
+and for the one-time `scripts/export_onnx.py`.
+
+`src/api/main.py` reads `SCREENING_BACKEND` at load time:
+
+| `SCREENING_BACKEND` | pipeline |
+|---|---|
+| `matlab` *(default)* | MATLAB does everything (`screen_image.m`). Required for PS26038. |
+| `python` | the reference `src/inference/pipeline.py` PyTorch pipeline — local debugging / comparing against the original numbers only. |
+
+**One-time install** (into the interpreter that runs FastAPI):
+
+```bash
+matlab -batch "disp(matlabroot)"                 # find <matlabroot>
+cd "<matlabroot>/extern/engines/python"
+python -m pip install .                           # R2022b+  (older: python setup.py install)
+python -c "import matlab.engine; print('ok')"
+```
+
+Also add the **Deep Learning Toolbox Converter for ONNX Model Format** support
+package in MATLAB (Add-On Explorer). Details: `requirements.txt` and
+[`matlab/README.md`](matlab/README.md).
+
+Check the MATLAB path reproduces the validated 89.7 % / 93.8 % numbers:
+
+```bash
+python scripts/compare_backends.py
+```
+
 ## Run the API locally
 
 ```bash
 export PYTHONPATH=.
 export API_KEY=dev-secret
 export ALLOWED_ORIGIN=http://localhost:5173        # your Base44 dev origin
-# no trained weights yet? allow an untrained model so the service still starts:
-export DR_ALLOW_UNTRAINED=1
+export SCREENING_BACKEND=matlab                    # default; needs the MATLAB Engine API
+# local debugging without MATLAB? use the reference PyTorch pipeline instead:
+#   export SCREENING_BACKEND=python
+#   export DR_ALLOW_UNTRAINED=1                     # start even with no trained weights
 uvicorn src.api.main:app --reload --port 8000
 ```
+
+On boot the app eagerly starts the MATLAB engine and imports the network once
+(logged with timings); `GET /health` reports `screening_backend`, whether the
+engine started, and whether the ONNX network imported. The `/predict`
+request/response contract is **identical** for both backends — the frontend
+needs zero changes.
 
 ### Test it with curl
 

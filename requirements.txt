@@ -34,3 +34,27 @@ python-multipart==0.0.22
 # --- tests ---
 pytest==9.1.1
 httpx==0.28.1
+
+# --------------------------------------------------------------------------- #
+# MATLAB Engine API for Python  (NOT a PyPI package - manual install)
+# --------------------------------------------------------------------------- #
+# The default screening backend (SCREENING_BACKEND=matlab, see src/api/main.py)
+# runs the whole pipeline inside MATLAB via matlab/screen_image.m, called
+# through `matlab.engine`. That package ships INSIDE MATLAB, not on PyPI, so it
+# cannot be listed as a normal dependency here. Install it once, into the same
+# interpreter that runs FastAPI:
+#
+#   1. Find matlabroot:   matlab -batch "disp(matlabroot)"
+#                         (e.g. /Applications/MATLAB_R2026a.app)
+#   2. cd "<matlabroot>/extern/engines/python"
+#   3. python -m pip install .          # modern method, R2022b and newer
+#        (older MATLAB: python setup.py install instead)
+#   4. verify:  python -c "import matlab.engine; print('ok')"
+#
+# Verified here with: `python -m pip install .`  on MATLAB R2026a
+# (matlabengine-26.1), Python 3.13. It also needs the "Deep Learning Toolbox
+# Converter for ONNX Model Format" support package inside MATLAB for
+# importNetworkFromONNX (Add-On Explorer).
+#
+# Not needed if you only ever run SCREENING_BACKEND=python (the reference
+# PyTorch pipeline, for local debugging / scripts/compare_backends.py).

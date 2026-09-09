@@ -26,7 +26,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 import os
+import time
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +37,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.config import DISCLAIMER
+
+_LOG = logging.getLogger("dr_sight.api")
 
 # --------------------------------------------------------------------------- #
 # config from env
@@ -45,10 +50,57 @@ ALLOWED_ORIGINS = [
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(12 * 1024 * 1024)))
 DR_ALLOW_UNTRAINED = os.getenv("DR_ALLOW_UNTRAINED", "0") == "1"
 
+# Which screening backend serves /predict.
+#   "matlab" (default) - the entire screening computation (image-quality
+#            assessment, DR grading, Grad-CAM explainability) runs inside MATLAB
+#            via matlab/screen_image.m, called through the MATLAB Engine API for
+#            Python. PS SIH26038 requires the MATLAB-based pipeline, so this is
+#            the default.
+#   "python" - the original PyTorch pipeline (src/inference/pipeline.py). Kept
+#            only for local debugging and for comparing against the validated
+#            PyTorch numbers (see scripts/compare_backends.py). Not for
+#            production under PS26038.
+SCREENING_BACKEND = os.getenv("SCREENING_BACKEND", "matlab").strip().lower()
+if SCREENING_BACKEND not in ("matlab", "python"):
+    raise RuntimeError(
+        f"SCREENING_BACKEND must be 'matlab' or 'python', got {SCREENING_BACKEND!r}"
+    )
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Warm the active backend on boot so the first /predict doesn't pay the cost.
+
+    For SCREENING_BACKEND=matlab this eagerly starts the MATLAB engine and
+    imports the ONNX network ONCE (several seconds); a failure is logged, not
+    fatal, so /health can still report the degraded state. The python backend
+    loads lazily on first use, as before.
+    """
+    if SCREENING_BACKEND == "matlab":
+        _LOG.info("SCREENING_BACKEND=matlab - starting MATLAB engine + importing ONNX ...")
+        t0 = time.perf_counter()
+        try:
+            from src.inference.matlab_pipeline import get_matlab_pipeline
+
+            h = get_matlab_pipeline().health()
+            _LOG.info(
+                "MATLAB backend ready in %.1fs (engine %.1fs, ONNX import %.1fs, net_ready=%s)",
+                time.perf_counter() - t0,
+                h.get("engine_start_seconds") or -1,
+                h.get("net_import_seconds") or -1,
+                h.get("network_ready"),
+            )
+        except Exception as e:  # MatlabEngineUnavailable etc. - don't crash boot
+            _LOG.error("MATLAB backend failed to start: %s", e)
+    else:
+        _LOG.info("SCREENING_BACKEND=python - PyTorch pipeline will load lazily.")
+    yield
+
+
 app = FastAPI(
     title="DR-Sight ML API",
     version="0.1.0",
     description="Diabetic retinopathy screening aid - not a diagnostic device.",
+    lifespan=lifespan,
 )
 
 if ALLOWED_ORIGINS:
@@ -88,12 +140,28 @@ def require_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Ke
 
 
 # --------------------------------------------------------------------------- #
-# lazy pipeline
+# lazy pipelines
 # --------------------------------------------------------------------------- #
-def _pipeline():
+def _python_pipeline():
+    """The original PyTorch pipeline. Only used when SCREENING_BACKEND=python."""
     from src.inference.pipeline import get_pipeline
 
     return get_pipeline(allow_untrained=DR_ALLOW_UNTRAINED)
+
+
+def _matlab_pipeline():
+    """The MATLAB screening backend (default). Owns one MATLAB engine session."""
+    from src.inference.matlab_pipeline import get_matlab_pipeline
+
+    return get_matlab_pipeline()
+
+
+def _screen(raw: bytes, *, with_heatmap: bool) -> dict:
+    """Run one image through the active backend and return a PredictionResult-shaped
+    dict. Identical output contract for both backends."""
+    if SCREENING_BACKEND == "matlab":
+        return _matlab_pipeline().run(raw, with_heatmap=with_heatmap)
+    return _python_pipeline().run(raw, with_heatmap=with_heatmap).to_dict()
 
 
 class PredictJSON(BaseModel):
@@ -106,12 +174,46 @@ class PredictJSON(BaseModel):
 # --------------------------------------------------------------------------- #
 @app.get("/health")
 def health():
+    if SCREENING_BACKEND == "matlab":
+        try:
+            pipe = _matlab_pipeline()
+        except Exception as e:  # MATLAB missing / license / ONNX import failure
+            return {
+                "status": "degraded",
+                "screening_backend": "matlab",
+                "model_loaded": False,
+                "matlab_engine_started": False,
+                "onnx_network_imported": False,
+                "detail": str(e),
+                "disclaimer": DISCLAIMER,
+            }
+        h = pipe.health()
+        return {
+            "status": "ok" if h["network_ready"] else "degraded",
+            "screening_backend": "matlab",
+            "model_loaded": h["network_ready"],
+            "matlab_engine_started": h["engine_started"],
+            "matlab_engine_start_seconds": h["engine_start_seconds"],
+            "onnx_network_imported": h["network_ready"],
+            "onnx_import_seconds": h["net_import_seconds"],
+            "onnx_path": h["onnx_path"],
+            # `using_trained_weights` only means something for the python backend.
+            "disclaimer": DISCLAIMER,
+        }
+
+    # --- python backend -------------------------------------------------- #
     try:
-        pipe = _pipeline()
+        pipe = _python_pipeline()
     except Exception as e:  # weights missing and untrained not allowed
-        return {"status": "degraded", "model_loaded": False, "detail": str(e)}
+        return {
+            "status": "degraded",
+            "screening_backend": "python",
+            "model_loaded": False,
+            "detail": str(e),
+        }
     return {
         "status": "ok",
+        "screening_backend": "python",
         "model_loaded": True,
         "using_trained_weights": pipe.trained,
         "synthetic_weights": getattr(pipe, "synthetic_weights", False),
@@ -167,8 +269,8 @@ async def predict(
         )
 
     try:
-        result = _pipeline().run(raw, with_heatmap=with_heatmap)
-    except Exception as e:  # decode failure, corrupt image, model error
+        result = _screen(raw, with_heatmap=with_heatmap)
+    except Exception as e:  # decode failure, corrupt image, model / MATLAB error
         raise HTTPException(status_code=422, detail=f"Could not process image: {e}")
 
-    return result.to_dict()
+    return result

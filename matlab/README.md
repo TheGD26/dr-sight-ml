@@ -13,6 +13,9 @@ training-free retinal-structure segmenters (optic disc, vessels).
 | `../scripts/export_onnx.py` | Export `models/best.pt` -> `models/dr_sight.onnx` (dynamic batch, input `input`, output `logits`). Prints the exact input shape + ImageNet mean/std MATLAB must match. |
 | `../scripts/make_reference_csv.py` | Dump per-image PyTorch predictions to `matlab/reference_test.csv` for the validation step. |
 | `grade_dr.m` | Grade one fundus image: returns `grade` (0-4), `label`, `confidence`, `probabilities`, `p_referable` (softmax mass on grades >= 2), `referable`, `referral_escalated`, `referral_action`, `uncertain`. Labels / referral actions / thresholds mirror `src/config.py`. |
+| `screen_image.m` | **The orchestrator.** `result = screen_image(imageInput, net, opts)` chains `quality_gate.m` -> `grade_dr.m` -> `explain_gradcam.m` into one call, reproducing all five stages of `src/inference/pipeline.py::DRPipeline.run()`. Returns a struct whose fields match `PredictionResult.to_dict()` key-for-key (`usable_image`, `rejection_reason`, `grade`, `label`, `confidence`, `uncertain`, `referable`, `p_referable`, `referral_escalated`, `referral_action`, `heatmap_base64`, `affected_regions`, `probabilities`, `quality_scores`, `disclaimer`). `net` is an optional pre-imported network (reused across calls); `opts` is name-value overrides for the quality/grading thresholds plus `WithHeatmap` (default true) to skip Grad-CAM. This is what the FastAPI backend calls for every real `/predict`. |
+| `load_screening_net.m` | Import `models/dr_sight.onnx` **once** and cache the `dlnetwork` (import costs seconds - must not happen per request). Used by `screen_image.m` as a fallback and by the Python bridge at startup. `importNetworkFromONNX` auto-generates custom layers (MobileNetV3 HardSwish / HardSigmoid) into `matlab/+dr_sight/`; that folder is git-ignored and regenerated on first import - the helper pins the working directory so it always lands there, never in the repo root or wherever the MATLAB Engine started. |
+| `test_screen_image.m` | Run `screen_image.m` end-to-end on 2-3 APTOS cache images (same sample dir as `DRScreeningDemo.m`), pretty-print each `PredictionResult`-shaped struct, and assert the field set matches `PredictionResult`. Sanity-check the MATLAB path here before wiring up Python. |
 | `validate_grading.m` | Run `grade_dr` over the reference CSV and check the ONNX-imported model agrees with PyTorch within tolerance. |
 | `quality_gate.m` | Port of `src/quality/image_quality.py`. Blur (variance of Laplacian), exposure (mean brightness + black/white clip fractions) and field-of-view (largest bright blob after Otsu) checks with the same reject-reason strings; returns `usable`, `reason`, `scores`, and for borderline-but-usable images an `enhanced_image` (flat-field + CLAHE + light denoise). Thresholds mirror `src/config.py::QualityConfig`. |
 | `test_quality_gate.m` | Runs `quality_gate` over APTOS cache / Grad-CAM sample images plus a few synthesised degraded variants, prints a verdict table, and saves before/after figures to `matlab/output/quality_samples/`. |
@@ -59,6 +62,75 @@ disc = segment_optic_disc("../data/aptos/cache/0024cdab0c1e.png", Show=true)  % 
 ves  = segment_vessels("../data/aptos/cache/0024cdab0c1e.png", Show=true)     % mask / skeleton / vessel_density
 SegmentationDemo                          % full before/after walkthrough + implementation-status block
 ```
+
+## MATLAB *is* the screening backend (PS26038)
+
+For PS SIH26038 the live service runs the **entire screening computation inside
+MATLAB**. FastAPI (`src/api/main.py`) is a thin HTTP/auth/CORS transport only:
+for every real `POST /predict` it calls `matlab/screen_image.m` through the
+**MATLAB Engine API for Python** (`src/inference/matlab_pipeline.py`), which
+owns one long-lived MATLAB session and imports `dr_sight.onnx` once. PyTorch is
+**not** in the request path - it survives only as historical training code and
+for the one-time `scripts/export_onnx.py`.
+
+```
+POST /predict ──▶ FastAPI (auth, CORS, size cap)
+                      │  matlab.engine  (one session, ONNX imported once)
+                      ▼
+              matlab/screen_image.m
+                 ├─ quality_gate.m       image-quality assessment (+ enhancement)
+                 ├─ grade_dr.m           DR grade 0-4 via importNetworkFromONNX
+                 └─ explain_gradcam.m    Grad-CAM overlay + focus regions
+                      │  jsonencode(result)
+                      ▼
+              PredictionResult-shaped JSON  ──▶  frontend (unchanged)
+```
+
+### Install the MATLAB Engine API for Python
+
+Into the **same** interpreter that runs FastAPI:
+
+```bash
+matlab -batch "disp(matlabroot)"          # e.g. /Applications/MATLAB_R2026a.app
+cd "<matlabroot>/extern/engines/python"
+python -m pip install .                    # modern method (R2022b+)
+#   older MATLAB: python setup.py install
+python -c "import matlab.engine; print('ok')"
+```
+
+Also install the **Deep Learning Toolbox Converter for ONNX Model Format**
+support package (MATLAB Add-On Explorer) for `importNetworkFromONNX`. See the
+comment block in `../requirements.txt`.
+
+### Select the backend
+
+`src/api/main.py` reads `SCREENING_BACKEND` at load time:
+
+| value | behaviour |
+|---|---|
+| `matlab` (default) | the MATLAB path above - required for PS26038 |
+| `python` | the original `src/inference/pipeline.py` PyTorch pipeline; local debugging / comparison only |
+
+```bash
+export SCREENING_BACKEND=matlab      # default; MATLAB does everything
+export SCREENING_BACKEND=python      # fall back to the reference PyTorch pipeline
+```
+
+`GET /health` reports `screening_backend`, whether the MATLAB engine started and
+the ONNX network imported, and how long each took. On boot the app eagerly
+starts the engine and imports the network once (logged), so the first
+`/predict` doesn't pay that latency.
+
+### Prove the MATLAB path reproduces the validated numbers
+
+```bash
+python scripts/compare_backends.py            # both backends, side by side
+```
+
+Prints grade / confidence / P(referable) from each backend for a handful of
+sample images plus the max absolute per-class softmax difference - the artefact
+that shows the MATLAB path reproduces the 89.7% / 93.8% PyTorch results, not
+just that it runs.
 
 ### Retinal segmentation scope (PS26038)
 
