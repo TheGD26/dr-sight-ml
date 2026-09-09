@@ -70,7 +70,7 @@ AI stage and the review stage).
 | `image_MB` | `0.35` | compressed fundus JPEG |
 | `bandwidth_Mbps` | `5` | clinic uplink |
 | `n_cameras` | `6` | camps uploading in parallel |
-| `ai_time_s` | `2.0` | quality gate + inference per image (typical CPU) |
+| `ai_time_s` | `1.06` | quality gate + inference per image — **measured**, not estimated (see Assumptions) |
 | `n_ai_workers` | `2` | inference worker processes |
 | `referral_frac` | `0.30` | share of images escalated to a human |
 | `review_time_s` | `120` | grade + read report + sign, per referred case (Prompt 3 targets <30 s of *model* time; 120 s budgets the whole human step) |
@@ -108,12 +108,32 @@ The console prints all of this in words.
 ### Typical result at baseline settings
 
 One reviewer already sustains well above 100,000 patients/year — at 120 s/case
-and a 30 % referral rate, a single ophthalmologist clears a few hundred thousand
-screenings/year. Each added reviewer adds roughly the same increment. The
-binding constraint for the programme as a whole is **AI inference / upload
-throughput**, not review capacity. The resource-allocation takeaway: spend on
+and a 30 % referral rate, a single ophthalmologist clears ~440,000
+screenings/year. Each added reviewer adds roughly the same increment. Once the
+panel is adequately staffed the binding constraint for the programme as a whole
+is **AI inference / upload throughput**, not review capacity: with the measured
+`ai_time_s = 1.06 s` the AI stage caps the pipeline at ~29.8M patients/year
+(vs ~15.8M under the old 2.0 s placeholder), still ahead of the ~169M/year
+upload ceiling. The resource-allocation takeaway is unchanged: spend on
 inference workers and uplink bandwidth before adding reviewers, and a 2-person
-panel gives comfortable margin against referral-rate spikes.
+panel gives comfortable margin against referral-rate spikes. The faster measured
+inference time only widens the AI headroom — it does not move the bottleneck.
+
+## Assumptions
+
+* **AI-processing time (`ai_time_s = 1.06 s`) is a measured value, not an
+  estimate.** It is the steady-state wall-clock time of one `screen_image.m`
+  call (image-quality gate → ONNX DR grade → Grad-CAM) through the live
+  `matlab.engine` session used by the FastAPI backend, with the one-time engine
+  start (~10 s) and ONNX import (~30–45 s) and a few warm-up calls excluded.
+  Measured over 24 timed calls on distinct APTOS fundus images:
+  **mean 1.06 s, range 0.68–1.54 s** (`with_heatmap=True`, the live request
+  path). Reproduce with `python scripts/measure_matlab_latency.py` from the
+  repo root on a machine with a licensed MATLAB. The previous `2.0 s` was a
+  pre-measurement typical-CPU placeholder (kept commented out in
+  `run_workflow_sim.m`). All other parameters below remain estimates.
+* Upload/bandwidth, referral fraction and review time are still planning
+  estimates, not measurements.
 
 ## Known simplifications
 

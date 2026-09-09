@@ -32,3 +32,7 @@ matlab/output/
 matlab/+dr_sight/
 runs/
 *.log
+
+# Simulink build caches - regenerated whenever run_workflow_sim.m runs.
+matlab/simulink/slprj/
+matlab/simulink/*.slxc

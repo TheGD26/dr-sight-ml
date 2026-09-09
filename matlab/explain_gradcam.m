@@ -148,9 +148,14 @@ end
 
 classIdx     = grade + 1;
 reductionFcn = @(y) y(classIdx);   % score = logit of the predicted grade
+% ReductionLayer pinned to the net's sole output layer 'x_net_classifier_Gem' (FC
+% layer from ONNX node /net/classifier/Gemm) - same layer gradCAM auto-selects,
+% but naming it silences the per-call "Using layer ... as the reduction layer"
+% notice. Re-check this name if models/dr_sight.onnx is re-exported / re-imported.
 try
     scoreMap = gradCAM(net, dlX, reductionFcn, ...
         FeatureLayer = char(featureLayer), ...
+        ReductionLayer = "x_net_classifier_Gem", ...
         OutputUpsampling = "bicubic");
 catch err
     names = string({net.Layers.Name});

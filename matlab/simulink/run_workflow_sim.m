@@ -31,7 +31,12 @@ images_per_patient = 2;             % one macula-centred image per eye
 image_MB           = 0.35;          % compressed fundus JPEG
 bandwidth_Mbps     = 5;             % rural clinic uplink
 n_cameras          = 6;             % screening camps uploading in parallel
-ai_time_s          = 2.0;           % quality gate + CPU inference per image
+% Measured steady-state wall-clock time of one screen_image.m call through the
+% live MATLAB engine (quality gate + ONNX grade + Grad-CAM), excluding engine
+% start / ONNX import / warm-up. 24 timed calls on distinct APTOS fundus images:
+% mean 1.06 s, range 0.68-1.54 s. See scripts/measure_matlab_latency.py.
+ai_time_s          = 1.06;           % quality gate + inference per image (measured)
+% ai_time_s        = 2.0;            % pre-measurement placeholder (typical-CPU estimate)
 n_ai_workers       = 2;             % inference worker processes
 referral_frac      = 0.30;          % share of images escalated to a human
 review_time_s      = 120;           % ophthalmologist grade + read + sign, per case

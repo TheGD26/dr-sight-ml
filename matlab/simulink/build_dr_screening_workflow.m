@@ -182,7 +182,7 @@ function assign_default_params()
         'image_MB',           0.35,       ...  % compressed fundus JPEG
         'bandwidth_Mbps',     5,          ...  % rural clinic uplink
         'n_cameras',          6,          ...  % camps operating in parallel
-        'ai_time_s',          2.0,        ...  % CPU inference + quality gate
+        'ai_time_s',          1.06,       ...  % measured screen_image.m call (was 2.0 est.)
         'n_ai_workers',       2,          ...  % inference worker processes
         'referral_frac',      0.30,       ...  % share escalated to a human
         'review_time_s',      120,        ...  % grade + read + sign report
